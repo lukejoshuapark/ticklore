@@ -1,0 +1,99 @@
+name: Publish
+
+on:
+  push:
+    branches: [main]
+    paths: ["**/Cargo.toml"]
+  workflow_dispatch:
+
+concurrency:
+  group: publish
+  cancel-in-progress: false
+
+permissions: {}
+
+jobs:
+  check-version:
+    name: Check for an unpublished version
+    runs-on: ubuntu-latest
+    if: github.repository == 'lukejoshuapark/ticklore'
+    permissions:
+      contents: read
+    outputs:
+      publish: ${{ steps.check.outputs.publish }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Compare workspace crates against crates.io
+        id: check
+        env:
+          USER_AGENT: ${{ github.repository }} publish workflow
+        run: .github/scripts/check-unpublished.sh
+
+  publish:
+    name: Publish unpublished crates
+    needs: check-version
+    if: needs.check-version.outputs.publish == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install raylib build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            cmake \
+            libasound2-dev \
+            libgl1-mesa-dev \
+            libglu1-mesa-dev \
+            libwayland-dev \
+            libx11-dev \
+            libxcursor-dev \
+            libxi-dev \
+            libxinerama-dev \
+            libxkbcommon-dev \
+            libxrandr-dev
+
+      - name: Install toolchain
+        run: |
+          rustup update stable --no-self-update
+          rustup default stable
+          rustup component add clippy
+
+      - name: Lint
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Test
+        run: cargo test --workspace
+
+      - name: Authenticate to crates.io
+        uses: rust-lang/crates-io-auth-action@v1
+        id: auth
+
+      - name: Publish
+        id: publish
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
+          USER_AGENT: ${{ github.repository }} publish workflow
+          PUBLISHED_LOG: ${{ runner.temp }}/published.txt
+        run: |
+          .github/scripts/publish-workspace.sh
+          echo "log=$PUBLISHED_LOG" >> "$GITHUB_OUTPUT"
+
+      - name: Tag the releases
+        env:
+          PUBLISHED_LOG: ${{ steps.publish.outputs.log }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          while read -r name version; do
+            [ -z "$name" ] && continue
+            tag="$name-v$version"
+            git tag -a "$tag" -m "$name v$version"
+            git push origin "$tag"
+          done < "$PUBLISHED_LOG"

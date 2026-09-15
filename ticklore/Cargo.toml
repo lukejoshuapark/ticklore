@@ -1,0 +1,17 @@
+[package]
+name = "ticklore"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.97"
+description = "Core traits for ticklore, a TCP game networking library."
+readme = "README.md"
+license = "MIT"
+repository = "https://github.com/lukejoshuapark/ticklore"
+keywords = ["gamedev", "networking", "multiplayer", "tcp", "game"]
+categories = ["game-development", "network-programming"]
+
+[lib]
+path = "lib.rs"
+
+[dependencies]
+serde = "1"
