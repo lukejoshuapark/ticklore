@@ -2,21 +2,24 @@
 
 The client half of [ticklore](https://github.com/lukejoshuapark/ticklore).
 
-`start_client` opens a raylib window, connects to a ticklore server, and drives
-a `Shadow` until the window is closed:
+`start_client` takes an already-open raylib window, connects to a ticklore
+server, and drives a `Shadow` until the window is closed:
 
 ```rust
 use ticklore_client::{ClientConfig, start_client};
 
-start_client(shadow, "127.0.0.1:9000", ClientConfig::default());
+let (rl, thread) = raylib::init().size(1280, 720).title("my game").build();
+
+start_client(shadow, "127.0.0.1:9000", ClientConfig::default(), rl, thread);
 ```
 
 ## How it works
 
-Two threads. The render thread owns the window and calls `Shadow::update` once
-per frame with everything that has arrived since the last one. A network thread
-owns the connection, applies incoming `ViewEvent`s to the view, and forwards
-the shadow's events to the server.
+Two threads. The render thread calls `Shadow::update` once per frame with
+everything that has arrived since the last one, using the raylib handle and
+thread the caller opened the window with. A network thread owns the
+connection, applies incoming `ViewEvent`s to the view, and forwards the
+shadow's events to the server.
 
 The view reaches the shadow as an `Arc` and is updated copy-on-write: if the
 shadow let go of the previous frame's view it is updated in place, and a copy
