@@ -1,5 +1,5 @@
-use crate::{ClientMessage, TransportError, read_transport, write_transport};
-use ticklore::{Shadow, ShadowInput, View, ViewEventsShadowInput};
+use crate::{ClientConfig, ClientMessage, HandshakeReply, TransportError, read_handshake_reply, read_transport, write_handshake, write_transport};
+use ticklore::{RejectionReason, Shadow, ShadowInput, View, ViewEventsShadowInput};
 
 use std::net::{Shutdown, TcpStream, ToSocketAddrs};
 use std::ops::ControlFlow;
@@ -12,21 +12,20 @@ const DISCONNECT_POLL_INTERVAL: Duration = Duration::from_millis(250);
 
 pub fn drive_connection<S : Shadow>(
     server_addr: impl ToSocketAddrs,
-    reconnect_delay: Duration,
-    keepalive_interval: Option<Duration>,
+    config: ClientConfig,
     outgoing_shadow_inputs: Sender<ShadowInput<S::View>>,
     incoming_shadow_events: Receiver<S::ShadowEvent>
 ) {
     loop {
         outgoing_shadow_inputs.send(ShadowInput::Connecting).ok();
 
-        match connect::<S>(&server_addr) {
-            Ok((write_stream, read_stream, view)) => {
+        match connect::<S>(&server_addr, &config.version) {
+            Ok(Connection::Accepted(write_stream, read_stream, view)) => {
                 let view = Arc::new(view);
                 outgoing_shadow_inputs.send(ShadowInput::Connected(Arc::clone(&view))).ok();
 
                 let read_thread = spawn_reader::<S>(read_stream, view, outgoing_shadow_inputs.clone());
-                let outcome = run_writer::<S>(write_stream, keepalive_interval, &incoming_shadow_events, &read_thread);
+                let outcome = run_writer::<S>(write_stream, config.keepalive_interval, &incoming_shadow_events, &read_thread);
                 read_thread.join().ok();
 
                 outgoing_shadow_inputs.send(ShadowInput::Disconnected).ok();
@@ -35,25 +34,42 @@ pub fn drive_connection<S : Shadow>(
                     return;
                 }
             },
+            Ok(Connection::Rejected(reason)) => {
+                outgoing_shadow_inputs.send(ShadowInput::Rejected(reason)).ok();
+                return;
+            },
             Err(_) => {
                 outgoing_shadow_inputs.send(ShadowInput::ConnectionFailed).ok();
             }
         }
 
-        if wait_to_reconnect(&incoming_shadow_events, reconnect_delay).is_break() {
+        if wait_to_reconnect(&incoming_shadow_events, config.reconnect_delay).is_break() {
             return;
         }
     }
 }
 
-fn connect<S : Shadow>(server_addr: impl ToSocketAddrs) -> Result<(TcpStream, TcpStream, S::View), TransportError> {
-    let write_stream = TcpStream::connect(server_addr)?;
+enum Connection<V> {
+    Accepted(TcpStream, TcpStream, V),
+    Rejected(RejectionReason)
+}
+
+fn connect<S : Shadow>(server_addr: impl ToSocketAddrs, version: &[u8]) -> Result<Connection<S::View>, TransportError> {
+    let mut write_stream = TcpStream::connect(server_addr)?;
     write_stream.set_nodelay(true)?;
 
     let mut read_stream = write_stream.try_clone()?;
+
+    write_handshake(&mut write_stream, version)?;
+    match read_handshake_reply(&mut read_stream)? {
+        HandshakeReply::Accepted => { },
+        HandshakeReply::ProtocolRejected => return Ok(Connection::Rejected(RejectionReason::Protocol)),
+        HandshakeReply::VersionRejected => return Ok(Connection::Rejected(RejectionReason::Version))
+    }
+
     let view: S::View = read_transport(&mut read_stream)?;
 
-    Ok((write_stream, read_stream, view))
+    Ok(Connection::Accepted(write_stream, read_stream, view))
 }
 
 fn spawn_reader<S : Shadow>(

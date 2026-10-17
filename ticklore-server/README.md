@@ -26,6 +26,28 @@ A joining client is sent a full `View` snapshot before any events. The world is
 cloned only on ticks where a client actually joined, so a server with a settled
 set of connections never copies its world at all.
 
+## Version checks
+
+Every connection opens with a handshake, before it is given a client ID or the
+world hears about it. The client sends ticklore's protocol version and the
+application version bytes from `ClientConfig::version`, and the server answers
+with a single byte accepting or rejecting it.
+
+A protocol mismatch is always rejected. The application version is handed to
+`ServerConfig::accept_version`, which accepts everything by default, so what a
+version means — an exact build, an allow-list, a range — is up to the caller:
+
+```rust
+let config = ServerConfig {
+    accept_version: Arc::new(|version| version == b"1.4.0"),
+    ..ServerConfig::default()
+};
+```
+
+The handshake is bound by the same timeouts as everything else, and a
+connection only subscribes to ticks once it is accepted, so a slow handshake
+cannot make it lag out before it has started.
+
 ## Backpressure
 
 `ServerConfig::broadcast_capacity` bounds how far a connection may fall behind.
@@ -53,8 +75,16 @@ instead of leaving the listener accepting clients that will never be ticked.
 
 ## Wire format
 
-Each message is a big-endian `u32` payload length followed by that many bytes
-of `bincode`. Messages from a client are a `ClientMessage`, either a shadow
+A connection opens with the handshake: the client sends a big-endian `u32`
+protocol version followed by a framed application version, and the server
+replies with one byte — `0` accepted, `1` protocol rejected, `2` version
+rejected. That much is raw bytes rather than `bincode` and does not change
+between protocol versions, so any two releases can always tell each other
+apart.
+
+After that, each message is a big-endian `u32` payload length followed by that
+many bytes of `bincode`. Messages from a client are a `ClientMessage`, either a shadow
 event or a keepalive the server discards. Payloads are capped at 4 MiB and the
 length is validated before anything is allocated. Both halves of ticklore must
-agree on that cap and on the shape of `ClientMessage`.
+agree on that cap and on the shape of `ClientMessage`, and any change to the
+wire format must bump `PROTOCOL_VERSION` in both.

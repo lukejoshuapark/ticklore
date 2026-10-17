@@ -10,7 +10,26 @@ const LENGTH_PREFIX_SIZE: usize = size_of::<u32>();
 
 const MAXIMUM_MESSAGE_LENGTH: u32 = 4 * 1024 * 1024;
 
+pub const PROTOCOL_VERSION: u32 = 1;
+
+pub async fn read_handshake<R : AsyncRead + Unpin>(r: &mut R) -> Result<(u32, Vec<u8>), TransportError> {
+    let protocol_version = r.read_u32().await?;
+    let version = read_frame(r).await?;
+    Ok((protocol_version, version))
+}
+
+pub async fn write_handshake_reply<W : AsyncWrite + Unpin>(w: &mut W, reply: HandshakeReply) -> Result<(), TransportError> {
+    w.write_u8(reply as u8).await?;
+    Ok(())
+}
+
 pub async fn read_transport<M : DeserializeOwned, R : AsyncRead + Unpin>(r: &mut R) -> Result<M, TransportError> {
+    let raw_message = read_frame(r).await?;
+    let message: M = bincode::deserialize(&raw_message)?;
+    Ok(message)
+}
+
+async fn read_frame<R : AsyncRead + Unpin>(r: &mut R) -> Result<Vec<u8>, TransportError> {
     let mut raw_message_length: [u8; LENGTH_PREFIX_SIZE] = [0; LENGTH_PREFIX_SIZE];
     r.read_exact(&mut raw_message_length).await?;
 
@@ -22,8 +41,7 @@ pub async fn read_transport<M : DeserializeOwned, R : AsyncRead + Unpin>(r: &mut
     let mut raw_message = vec![0; message_length as usize];
     r.read_exact(&mut raw_message).await?;
 
-    let message: M = bincode::deserialize(&raw_message)?;
-    Ok(message)
+    Ok(raw_message)
 }
 
 
@@ -40,6 +58,14 @@ pub async fn write_transport<W : AsyncWrite + Unpin>(w: &mut W, message: impl Se
     w.write_all(&payload).await?;
 
     Ok(())
+}
+
+#[derive(Clone, Copy, Debug)]
+#[repr(u8)]
+pub enum HandshakeReply {
+    Accepted = 0,
+    ProtocolRejected = 1,
+    VersionRejected = 2
 }
 
 #[derive(Deserialize, Serialize)]

@@ -1,8 +1,7 @@
-use crate::{ClientMessage, Tick, read_transport, with_timeout, write_transport};
+use crate::{ClientMessage, HandshakeReply, PROTOCOL_VERSION, ServerConfig, Tick, TransportError, read_handshake, read_transport, with_timeout, write_handshake_reply, write_transport};
 use ticklore::{ConnectionWorldInput, DisconnectionWorldInput, ShadowEvent, ShadowEventWorldInput, World, WorldInput};
 
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::Duration;
 
 use tokio::net::TcpStream;
 use tokio::sync::broadcast::error::RecvError;
@@ -14,12 +13,28 @@ static NEXT_CLIENT_ID: AtomicU64 = AtomicU64::new(0);
 
 pub async fn drive_connection<W : World>(
     mut stream: TcpStream,
-    read_timeout: Option<Duration>,
-    write_timeout: Option<Duration>,
+    config: ServerConfig,
     outgoing_world_inputs: mpsc::UnboundedSender<WorldInput<W::ShadowEvent>>,
-    mut incoming_ticks: broadcast::Receiver<Tick<W>>,
+    outgoing_ticks: broadcast::Sender<Tick<W>>,
     mut incoming_cancellation: broadcast::Receiver<()>
 ) {
+    let read_timeout = config.read_timeout;
+    let write_timeout = config.write_timeout;
+
+    match handshake(&mut stream, &config).await {
+        Ok(HandshakeReply::Accepted) => { },
+        Ok(reply) => {
+            info!(reply = ?reply, "Client rejected during handshake");
+            return;
+        },
+        Err(err) => {
+            warn!(err = ?err, "Failed to complete handshake with client");
+            return;
+        }
+    }
+
+    let mut incoming_ticks = outgoing_ticks.subscribe();
+
     let client_id = NEXT_CLIENT_ID.fetch_add(1, Ordering::Relaxed);
     let connection_world_input = WorldInput::Connection(ConnectionWorldInput { client_id });
     outgoing_world_inputs.send(connection_world_input).ok();
@@ -99,6 +114,21 @@ pub async fn drive_connection<W : World>(
     }
 
     disconnected(client_id, &outgoing_world_inputs);
+}
+
+async fn handshake(stream: &mut TcpStream, config: &ServerConfig) -> Result<HandshakeReply, TransportError> {
+    let (protocol_version, version) = with_timeout(config.read_timeout, read_handshake(stream)).await?;
+
+    let reply = if protocol_version != PROTOCOL_VERSION {
+        HandshakeReply::ProtocolRejected
+    } else if !(config.accept_version)(&version) {
+        HandshakeReply::VersionRejected
+    } else {
+        HandshakeReply::Accepted
+    };
+
+    with_timeout(config.write_timeout, write_handshake_reply(stream, reply)).await?;
+    Ok(reply)
 }
 
 fn disconnected<SE : ShadowEvent>(client_id: u64, outgoing_world_inputs: &mpsc::UnboundedSender<WorldInput<SE>>) {

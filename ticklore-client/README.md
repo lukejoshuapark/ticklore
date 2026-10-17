@@ -32,13 +32,23 @@ does not pays nothing for the option.
 The client reconnects on its own, waiting `ClientConfig::reconnect_delay`
 between attempts. A `Shadow` sees the whole lifecycle through `ShadowInput`:
 `Connecting`, `ConnectionFailed`, `Connected` carrying the snapshot that opened
-the session, and `Disconnected`.
+the session, `Disconnected`, and `Rejected`.
 
 Events a shadow emits while there is no connection are discarded rather than
 replayed into the next one, since the server never saw the session they
 belonged to.
 
 Closing the window shuts the network thread down and joins it.
+
+## Version checks
+
+Each connection opens with a handshake carrying ticklore's protocol version and
+`ClientConfig::version`, bytes of the application's choosing that the server
+checks against its own rules. A client the server turns away receives
+`ShadowInput::Rejected` with a `RejectionReason` — `Protocol` if the two halves
+of ticklore disagree, `Version` if the server refused the application version —
+and stops reconnecting, since the same client asking again cannot succeed. The
+window stays open, so the shadow can tell the player to update.
 
 ## Keepalive
 

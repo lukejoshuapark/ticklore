@@ -8,8 +8,15 @@ pub enum ShadowInput<V : View> {
     Connecting,
     ConnectionFailed,
     Connected(Arc<V>),
+    Rejected(RejectionReason),
     Disconnected,
     ViewEvents(ViewEventsShadowInput<V>)
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum RejectionReason {
+    Protocol,
+    Version
 }
 
 pub struct TimeShadowInput {

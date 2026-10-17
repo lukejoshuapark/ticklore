@@ -1,4 +1,4 @@
-use crate::{Tick, drive_connection};
+use crate::{ServerConfig, Tick, drive_connection};
 use ticklore::{World, WorldInput};
 
 use std::io::ErrorKind;
@@ -15,8 +15,7 @@ const ACCEPT_BACKOFF_MAXIMUM: Duration = Duration::from_secs(1);
 
 pub async fn drive_listener<W : World>(
     listen_addr: impl ToSocketAddrs,
-    read_timeout: Option<Duration>,
-    write_timeout: Option<Duration>,
+    config: ServerConfig,
     outgoing_world_inputs: mpsc::UnboundedSender<WorldInput<W::ShadowEvent>>,
     outgoing_ticks: broadcast::Sender<Tick<W>>
 ) -> Result<(), std::io::Error> {
@@ -49,9 +48,9 @@ pub async fn drive_listener<W : World>(
         }
 
         let outgoing_world_inputs = outgoing_world_inputs.clone();
-        let incoming_ticks = outgoing_ticks.subscribe();
+        let outgoing_ticks = outgoing_ticks.clone();
         let incoming_cancellation = outgoing_cancellation.subscribe();
-        task::spawn(drive_connection::<W>(stream, read_timeout, write_timeout, outgoing_world_inputs, incoming_ticks, incoming_cancellation));
+        task::spawn(drive_connection::<W>(stream, config.clone(), outgoing_world_inputs, outgoing_ticks, incoming_cancellation));
     }
 }
 
