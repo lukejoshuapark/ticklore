@@ -6,13 +6,15 @@ const DEFAULT_TICK_PERIOD: Duration = Duration::from_nanos(1_000_000_000 / 60);
 
 const DEFAULT_BROADCAST_CAPACITY: usize = 64;
 
+pub type AcceptVersion = Arc<dyn Fn(&[u8]) -> bool + Send + Sync>;
+
 #[derive(Clone)]
 pub struct ServerConfig {
     pub tick_period: Duration,
     pub broadcast_capacity: usize,
     pub read_timeout: Option<Duration>,
     pub write_timeout: Option<Duration>,
-    pub accept_version: Arc<dyn Fn(&[u8]) -> bool + Send + Sync>
+    pub accept_version: AcceptVersion
 }
 
 impl Default for ServerConfig {

@@ -480,14 +480,14 @@ dependencies = [
 
 [[package]]
 name = "ticklore"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "serde",
 ]
 
 [[package]]
 name = "ticklore-client"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "bincode",
  "raylib",
@@ -498,7 +498,7 @@ dependencies = [
 
 [[package]]
 name = "ticklore-server"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "bincode",
  "serde",
