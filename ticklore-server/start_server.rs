@@ -19,7 +19,7 @@ pub async fn start_server<W : World>(world: W, listen_addr: impl ToSocketAddrs, 
             Ok(()) => Err(io::Error::other("the world stopped ticking")),
             Err(err) => Err(io::Error::other(format!("the world panicked: {err}")))
         },
-        listener_result = drive_listener(listen_addr, outgoing_world_inputs, outgoing_ticks) => listener_result
+        listener_result = drive_listener(listen_addr, config.read_timeout, config.write_timeout, outgoing_world_inputs, outgoing_ticks) => listener_result
     };
 
     world_task.abort();

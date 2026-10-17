@@ -1,4 +1,4 @@
-use crate::{TransportError, read_transport, write_transport};
+use crate::{ClientMessage, TransportError, read_transport, write_transport};
 use ticklore::{Shadow, ShadowInput, View, ViewEventsShadowInput};
 
 use std::net::{Shutdown, TcpStream, ToSocketAddrs};
@@ -13,6 +13,7 @@ const DISCONNECT_POLL_INTERVAL: Duration = Duration::from_millis(250);
 pub fn drive_connection<S : Shadow>(
     server_addr: impl ToSocketAddrs,
     reconnect_delay: Duration,
+    keepalive_interval: Option<Duration>,
     outgoing_shadow_inputs: Sender<ShadowInput<S::View>>,
     incoming_shadow_events: Receiver<S::ShadowEvent>
 ) {
@@ -25,7 +26,7 @@ pub fn drive_connection<S : Shadow>(
                 outgoing_shadow_inputs.send(ShadowInput::Connected(Arc::clone(&view))).ok();
 
                 let read_thread = spawn_reader::<S>(read_stream, view, outgoing_shadow_inputs.clone());
-                let outcome = run_writer::<S>(write_stream, &incoming_shadow_events, &read_thread);
+                let outcome = run_writer::<S>(write_stream, keepalive_interval, &incoming_shadow_events, &read_thread);
                 read_thread.join().ok();
 
                 outgoing_shadow_inputs.send(ShadowInput::Disconnected).ok();
@@ -86,20 +87,34 @@ fn spawn_reader<S : Shadow>(
 
 fn run_writer<S : Shadow>(
     mut write_stream: TcpStream,
+    keepalive_interval: Option<Duration>,
     incoming_shadow_events: &Receiver<S::ShadowEvent>,
     read_thread: &JoinHandle<()>
 ) -> ControlFlow<()> {
     while incoming_shadow_events.try_recv().is_ok() { }
 
+    let mut last_write = Instant::now();
+
     let outcome = loop {
-        match incoming_shadow_events.recv_timeout(DISCONNECT_POLL_INTERVAL) {
-            Ok(shadow_event) => {
-                if write_transport(&mut write_stream, shadow_event).is_err() {
-                    break ControlFlow::Continue(());
-                }
-            },
-            Err(RecvTimeoutError::Timeout) => { },
+        let poll_interval = match keepalive_interval {
+            Some(keepalive_interval) => DISCONNECT_POLL_INTERVAL.min(keepalive_interval.saturating_sub(last_write.elapsed())),
+            None => DISCONNECT_POLL_INTERVAL
+        };
+
+        let message = match incoming_shadow_events.recv_timeout(poll_interval) {
+            Ok(shadow_event) => Some(ClientMessage::ShadowEvent(shadow_event)),
+            Err(RecvTimeoutError::Timeout) => keepalive_interval
+                .filter(|keepalive_interval| last_write.elapsed() >= *keepalive_interval)
+                .map(|_| ClientMessage::Keepalive),
             Err(RecvTimeoutError::Disconnected) => break ControlFlow::Break(())
+        };
+
+        if let Some(message) = message {
+            if write_transport(&mut write_stream, message).is_err() {
+                break ControlFlow::Continue(());
+            }
+
+            last_write = Instant::now();
         }
 
         if read_thread.is_finished() {

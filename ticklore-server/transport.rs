@@ -1,7 +1,10 @@
 use serde::de::DeserializeOwned;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
+use tokio::time::timeout;
+
+use std::time::Duration;
 
 const LENGTH_PREFIX_SIZE: usize = size_of::<u32>();
 
@@ -39,6 +42,22 @@ pub async fn write_transport<W : AsyncWrite + Unpin>(w: &mut W, message: impl Se
     Ok(())
 }
 
+#[derive(Deserialize, Serialize)]
+pub enum ClientMessage<SE> {
+    ShadowEvent(SE),
+    Keepalive
+}
+
+pub async fn with_timeout<T>(
+    duration: Option<Duration>,
+    transport: impl Future<Output = Result<T, TransportError>>
+) -> Result<T, TransportError> {
+    match duration {
+        Some(duration) => timeout(duration, transport).await.map_err(|_| TransportError::TimedOut)?,
+        None => transport.await
+    }
+}
+
 #[derive(Debug, Error)]
 pub enum TransportError {
     #[error("failed to serialize message: {0}")]
@@ -48,5 +67,8 @@ pub enum TransportError {
     IO(#[from] std::io::Error),
 
     #[error("the supplied message is too large")]
-    MessageTooLarge
+    MessageTooLarge,
+
+    #[error("timed out")]
+    TimedOut
 }

@@ -40,6 +40,14 @@ belonged to.
 
 Closing the window shuts the network thread down and joins it.
 
+## Keepalive
+
+A client only writes when its shadow emits an event, so an idle player looks
+the same as a vanished one to a server with `ServerConfig::read_timeout` set.
+Setting `ClientConfig::keepalive_interval` makes the client send a keepalive
+whenever it has written nothing for that long. It is off by default, and
+should sit comfortably below the server's read timeout.
+
 ## Building
 
 raylib is built from source, so a C toolchain, CMake, and the usual X11 and GL

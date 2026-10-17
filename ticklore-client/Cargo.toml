@@ -1,6 +1,6 @@
 [package]
 name = "ticklore-client"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2024"
 rust-version = "1.97"
 description = "The client half of ticklore: connects to a ticklore server and drives a raylib render loop."
@@ -14,9 +14,9 @@ categories = ["game-development", "network-programming"]
 path = "lib.rs"
 
 [dependencies]
-ticklore = { version = "0.1.0", path = "../ticklore" }
+ticklore = { version = "0.3.0", path = "../ticklore" }
 
 bincode = "1.3.3"
 raylib = "6"
-serde = "1"
+serde = { version = "1", features = ["derive"] }
 thiserror = "2"

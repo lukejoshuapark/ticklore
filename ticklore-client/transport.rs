@@ -1,7 +1,7 @@
 use std::io::{Read, Write};
 
 use serde::de::DeserializeOwned;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 const LENGTH_PREFIX_SIZE: usize = size_of::<u32>();
@@ -38,6 +38,12 @@ pub fn write_transport<W : Write>(w: &mut W, message: impl Serialize) -> Result<
     w.write_all(&payload)?;
 
     Ok(())
+}
+
+#[derive(Deserialize, Serialize)]
+pub enum ClientMessage<SE> {
+    ShadowEvent(SE),
+    Keepalive
 }
 
 #[derive(Debug, Error)]

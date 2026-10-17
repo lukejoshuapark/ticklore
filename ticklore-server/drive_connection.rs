@@ -1,7 +1,8 @@
-use crate::{Tick, read_transport, write_transport};
+use crate::{ClientMessage, Tick, read_transport, with_timeout, write_transport};
 use ticklore::{ConnectionWorldInput, DisconnectionWorldInput, ShadowEvent, ShadowEventWorldInput, World, WorldInput};
 
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::Duration;
 
 use tokio::net::TcpStream;
 use tokio::sync::broadcast::error::RecvError;
@@ -13,6 +14,8 @@ static NEXT_CLIENT_ID: AtomicU64 = AtomicU64::new(0);
 
 pub async fn drive_connection<W : World>(
     mut stream: TcpStream,
+    read_timeout: Option<Duration>,
+    write_timeout: Option<Duration>,
     outgoing_world_inputs: mpsc::UnboundedSender<WorldInput<W::ShadowEvent>>,
     mut incoming_ticks: broadcast::Receiver<Tick<W>>,
     mut incoming_cancellation: broadcast::Receiver<()>
@@ -38,7 +41,7 @@ pub async fn drive_connection<W : World>(
         }
     };
 
-    if let Err(err) = write_transport(&mut stream, view).await {
+    if let Err(err) = with_timeout(write_timeout, write_transport(&mut stream, view)).await {
         warn!(client_id = client_id, err = ?err, "Failed to send initial view to client, likely disconnected");
         disconnected(client_id, &outgoing_world_inputs);
         return;
@@ -48,8 +51,9 @@ pub async fn drive_connection<W : World>(
 
     let read_future = async {
         loop {
-            let shadow_event: W::ShadowEvent = match read_transport(&mut stream_read).await {
-                Ok(shadow_event) => shadow_event,
+            let shadow_event = match with_timeout(read_timeout, read_transport(&mut stream_read)).await {
+                Ok(ClientMessage::ShadowEvent(shadow_event)) => shadow_event,
+                Ok(ClientMessage::Keepalive) => continue,
                 Err(err) => {
                     warn!(client_id = client_id, err = ?err, "Failed to receive event from client, likely disconnected");
                     break;
@@ -81,7 +85,7 @@ pub async fn drive_connection<W : World>(
                 continue;
             }
 
-            if let Err(err) = write_transport(&mut stream_write, view_events).await {
+            if let Err(err) = with_timeout(write_timeout, write_transport(&mut stream_write, view_events)).await {
                 warn!(client_id = client_id, err = ?err, "Failed to send events to client, likely disconnected");
                 break;
             };

@@ -20,8 +20,9 @@ pub fn start_client<S>(
     let (outgoing_shadow_events, incoming_shadow_events) = mpsc::channel::<S::ShadowEvent>();
 
     let reconnect_delay = config.reconnect_delay;
+    let keepalive_interval = config.keepalive_interval;
     let connection_thread = thread::spawn(move || {
-        drive_connection::<S>(server_addr, reconnect_delay, outgoing_shadow_inputs, incoming_shadow_events)
+        drive_connection::<S>(server_addr, reconnect_delay, keepalive_interval, outgoing_shadow_inputs, incoming_shadow_events)
     });
 
     let mut shadow_inputs: Vec<ShadowInput<S::View>> = vec![];
